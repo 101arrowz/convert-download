@@ -1,0 +1,55 @@
+{
+  "name": "convert-download",
+  "version": "0.0.1",
+  "description": "Convert a downloaded file with the CloudConvert API",
+  "main": "index.js",
+  "author": "Arjun Barrett",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc && parcel build src/manifest.json --no-source-maps --public-url ./",
+    "start": "parcel watch src/manifest.json --public-url ./ --no-hmr",
+    "lint": "eslint \"src/**/*.ts\"",
+    "version": "node scripts/updateManifest \"{\\\"version\\\": \\\"$npm_package_version\\\"}\"; git add src/manifest.json > /dev/null 2>&1 || true"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.91",
+    "@types/cookie": "^0.3.3",
+    "@typescript-eslint/eslint-plugin": "^2.11.0",
+    "@typescript-eslint/parser": "^2.11.0",
+    "eslint": "^6.7.2",
+    "eslint-config-prettier": "^6.7.0",
+    "eslint-plugin-prettier": "^3.1.1",
+    "parcel-bundler": "^1.12.4",
+    "parcel-plugin-pwa-manifest": "^2.6.0",
+    "parcel-plugin-web-extension": "^1.5.2",
+    "prettier": "^1.19.1",
+    "typescript": "^3.7.3"
+  },
+  "pwaManifest": {
+    "icongeneration": {
+      "disabled": false,
+      "genIconOpts": {
+        "baseIcon": "./src/baseIcon.png",
+        "sizes": [
+          16,
+          24,
+          32,
+          48,
+          64,
+          96,
+          128,
+          256
+        ],
+        "formats": {
+          "png": {
+            "compressionLevel": 9
+          }
+        }
+      }
+    },
+    "disabled": true
+  },
+  "dependencies": {
+    "cookie": "^0.4.0"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "manifest_version": 2,
+  "name": "Download Converter",
+  "version": "0.0.1",
+  "author": "Arjun Barrett",
+  "icons": {
+    "16": "icons/icon-16x16.fa72cf85.png",
+    "24": "icons/icon-24x24.61fbd79a.png",
+    "32": "icons/icon-32x32.f11fb2b8.png",
+    "48": "icons/icon-48x48.bdd6a188.png",
+    "64": "icons/icon-64x64.e8b13279.png",
+    "128": "icons/icon-128x128.ca98989e.png",
+    "192": "icons/icon-192x192.70330bb4.png",
+    "256": "icons/icon-256x256.18114b0c.png",
+    "512": "icons/icon-512x512.a56b07dc.png"
+  },
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "Convert Download",
+    "default_icon": {
+      "16": "icons/icon-16x16.fa72cf85.png",
+      "24": "icons/icon-24x24.61fbd79a.png",
+      "32": "icons/icon-32x32.f11fb2b8.png",
+      "48": "icons/icon-48x48.bdd6a188.png",
+      "64": "icons/icon-64x64.e8b13279.png",
+      "128": "icons/icon-128x128.ca98989e.png",
+      "192": "icons/icon-192x192.70330bb4.png",
+      "256": "icons/icon-256x256.18114b0c.png",
+      "512": "icons/icon-512x512.a56b07dc.png"
+    }
+  },
+  "background": {
+    "scripts": ["background.ts"],
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://cloudconvert.com/dashboard/api/v2/keys"],
+      "js":  ["injectedGetAPIKey.ts"]
+    }
+  ],
+  "description": "Convert downloaded files quickly and easily using CloudConvert",
+  "permissions": [
+    "storage",
+    "downloads",
+    "notifications",
+    "https://cloudconvert.com/dashboard/api/v2/keys"
+  ],
+  "options_page": "options.html"
+}
