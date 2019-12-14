@@ -44,7 +44,9 @@
     "storage",
     "downloads",
     "notifications",
-    "https://cloudconvert.com/dashboard/api/v2/keys"
+    "https://cloudconvert.com/dashboard/api/v2/keys",
+    "https://api.cloudconvert.com/*",
+    "file://*"
   ],
   "options_page": "options.html"
 }
