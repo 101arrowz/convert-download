@@ -4,7 +4,6 @@ import getSupportedFormats from './util/getSupportedFormats';
 const MAIN_ICON = './icons/icon-512x512.a56b07dc.png';
 const API_BASE = 'https://api.cloudconvert.com/v2';
 const WEBSOCKET_BASE = 'https://socketio.cloudconvert.com';
-declare const window: BackgroundWindow;
 const waitUntilFinished = (
   id: number
 ): Promise<chrome.downloads.DownloadItem> =>
@@ -17,6 +16,9 @@ const waitUntilFinished = (
         setTimeout(() => resolve(waitUntilFinished(id)), 100)
       );
   });
+chrome.browserAction.setBadgeBackgroundColor({
+  color: 'gray'
+});
 chrome.downloads.onDeterminingFilename.addListener(item => {
   if (item.byExtensionId === chrome.runtime.id) return;
   const filename = item.filename;
@@ -49,9 +51,12 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
           });
         };
         const configure = (): void => {
-          chrome.storage.local.set({
-            recommendedOption: ext
-          }, () => chrome.runtime.openOptionsPage());
+          chrome.storage.local.set(
+            {
+              recommendedOption: ext
+            },
+            () => chrome.runtime.openOptionsPage()
+          );
         };
         const onButtonClicked = (id: string, ind: number): void => {
           if (id === notifId) {
@@ -61,7 +66,9 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
         };
         chrome.notifications.onClosed.addListener(id => onButtonClicked(id, 1));
         chrome.notifications.onButtonClicked.addListener(onButtonClicked);
-        chrome.notifications.onClicked.addListener(id => onButtonClicked(id, 0));
+        chrome.notifications.onClicked.addListener(id =>
+          onButtonClicked(id, 0)
+        );
       });
     } else {
       if (content.disabled) return;
@@ -71,84 +78,226 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
           chrome.browserAction.setBadgeText({
             text: '...'
           });
-
-          waitUntilFinished(item.id).then(item => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', `file://${item.filename}`, true);
-            xhr.addEventListener('load', () => {
-              const blob = xhr.response;
-              fetch(`${API_BASE}/jobs`, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                  Accept: 'application/json'
+          if (content.removeOrig) chrome.downloads.cancel(item.id);
+          fetch(`${API_BASE}/jobs`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+              tasks: {
+                importFile: {
+                  operation: 'import/url',
+                  url: item.finalUrl,
+                  filename: item.filename
                 },
-                body: JSON.stringify({
-                  tasks: {
-                    importFile: {
-                      operation: 'import/upload'
-                    },
-                    convert: {
-                      operation: 'convert',
-                      input: 'importFile',
-                      input_format: ext,
-                      output_format: content.convertTo
-                    },
-                    exportFile: {
-                      operation: 'export/url',
-                      input: 'convert'
-                    }
+                convert: {
+                  operation: 'convert',
+                  input: 'importFile',
+                  input_format: ext,
+                  output_format: content.convertTo
+                },
+                exportFile: {
+                  operation: 'export/url',
+                  input: 'convert'
+                }
+              }
+            })
+          })
+            .then(res => res.json())
+            .then(val => {
+              const socket = io(WEBSOCKET_BASE);
+              socket.emit('subscribe', {
+                channel: `private-job.${val.data.id}`,
+                auth: {
+                  headers: {
+                    Authorization: `Bearer ${token}`
                   }
-                })
-              })
-                .then(res => res.json())
-                .then(val => {
-                  const id = val.data.id;
-                  const uploadForm = val.data.tasks.find(
-                    (el: { operation: string }) =>
-                      el.operation === 'import/upload'
-                  ).result.form;
-                  const formURL = uploadForm.url;
-                  const formData = new FormData();
-                  for (const k in uploadForm.parameters) {
-                    formData.append(k, uploadForm.parameters[k]);
+                }
+              });
+              socket.on(
+                'job.finished',
+                (
+                  channel: string,
+                  data: {
+                    job: {
+                      tasks: {
+                        operation: string;
+                        result: { files: { url: string }[] };
+                      }[];
+                    };
                   }
-                  formData.append('file', blob, filename);
-                  const socket = io(WEBSOCKET_BASE);
-                  socket.emit('subscribe', {
-                    channel: `private-job.${id}`,
-                    auth: {
-                      headers: {
-                        Authorization: `Bearer ${token}`
-                      }
-                    }
-                  })
-                  socket.on('job.finished', (channel: string, data: { job: { tasks: ({ operation: string, result: ({ files: ({ url: string })[] }) })[] } }) => {
-                    chrome.downloads.download({
+                ) => {
+                  chrome.downloads.download(
+                    {
                       url: data.job.tasks.find(
                         (el: { operation: string }) =>
                           el.operation === 'export/url'
                       ).result.files[0].url
-                    }, () => {
+                    },
+                    () => {
                       chrome.browserAction.setBadgeText({
-                        text: chrome.runtime.lastError ? 'FAIL' : ''
+                        text: chrome.runtime.lastError ? '❌' : '✔️'
                       });
-                    });
-                    if (content.removeOrig) chrome.downloads.removeFile(item.id)
+                      setTimeout(
+                        () =>
+                          chrome.browserAction.setBadgeText({
+                            text: ''
+                          }),
+                        5000
+                      );
+                    }
+                  );
+                }
+              );
+              const fallbackDownload = (downloadId: number) =>
+                waitUntilFinished(downloadId).then(item => {
+                  const xhr = new XMLHttpRequest();
+                  xhr.open('GET', `file://${item.filename}`, true);
+                  xhr.addEventListener('load', () => {
+                    const blob = xhr.response;
+                    fetch(`${API_BASE}/jobs`, {
+                      method: 'POST',
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json'
+                      },
+                      body: JSON.stringify({
+                        tasks: {
+                          importFile: {
+                            operation: 'import/upload'
+                          },
+                          convert: {
+                            operation: 'convert',
+                            input: 'importFile',
+                            input_format: ext,
+                            output_format: content.convertTo
+                          },
+                          exportFile: {
+                            operation: 'export/url',
+                            input: 'convert'
+                          }
+                        }
+                      })
+                    })
+                      .then(res => res.json())
+                      .then(val => {
+                        const id = val.data.id;
+                        const uploadForm = val.data.tasks.find(
+                          (el: { operation: string }) =>
+                            el.operation === 'import/upload'
+                        ).result.form;
+                        const formURL = uploadForm.url;
+                        const formData = new FormData();
+                        for (const k in uploadForm.parameters) {
+                          formData.append(k, uploadForm.parameters[k]);
+                        }
+                        formData.append('file', blob, filename);
+                        const socket = io(WEBSOCKET_BASE);
+                        socket.emit('subscribe', {
+                          channel: `private-job.${id}`,
+                          auth: {
+                            headers: {
+                              Authorization: `Bearer ${token}`
+                            }
+                          }
+                        });
+                        socket.on(
+                          'job.finished',
+                          (
+                            channel: string,
+                            data: {
+                              job: {
+                                tasks: {
+                                  operation: string;
+                                  result: { files: { url: string }[] };
+                                }[];
+                              };
+                            }
+                          ) => {
+                            chrome.downloads.download(
+                              {
+                                url: data.job.tasks.find(
+                                  (el: { operation: string }) =>
+                                    el.operation === 'export/url'
+                                ).result.files[0].url
+                              },
+                              () => {
+                                chrome.browserAction.setBadgeText({
+                                  text: chrome.runtime.lastError ? '❌' : '✔️'
+                                });
+                                setTimeout(
+                                  () =>
+                                    chrome.browserAction.setBadgeText({
+                                      text: ''
+                                    }),
+                                  5000
+                                );
+                              }
+                            );
+                            if (content.removeOrig)
+                              chrome.downloads.removeFile(item.id);
+                          }
+                        );
+                        socket.on(
+                          'job.failed',
+                          (channel: string, data: unknown) => {
+                            console.log(data);
+                            chrome.browserAction.setBadgeText({
+                              text: '❌'
+                            });
+                            setTimeout(
+                              () =>
+                                chrome.browserAction.setBadgeText({
+                                  text: ''
+                                }),
+                              5000
+                            );
+                          }
+                        );
+                        fetch(formURL, { method: 'POST', body: formData });
+                      });
                   });
-                  socket.on('job.failed', (channel: string, data: unknown) => {
-                    console.log(data);
-                    chrome.browserAction.setBadgeText({
-                      text: 'FAIL'
-                    });
-                  });
-                  fetch(formURL, { method: 'POST', body: formData });
+                  xhr.responseType = 'blob';
+                  xhr.send();
                 });
+              socket.on('job.failed', (channel: string, data: unknown) => {
+                chrome.permissions.request(
+                  {
+                    origins: ['file://*']
+                  },
+                  granted => {
+                    if (granted) {
+                      if (content.removeOrig)
+                        chrome.downloads.download(
+                          {
+                            url: item.url
+                          },
+                          downloadId => {
+                            fallbackDownload(downloadId);
+                          }
+                        );
+                      else fallbackDownload(item.id);
+                    } else {
+                      chrome.browserAction.setBadgeText({
+                        text: 'FAIL'
+                      });
+                      setTimeout(
+                        () =>
+                          chrome.browserAction.setBadgeText({
+                            text: ''
+                          }),
+                        5000
+                      );
+                    }
+                  }
+                );
+              });
             });
-            xhr.responseType = 'blob';
-            xhr.send();
-          });
         }
       });
     }
