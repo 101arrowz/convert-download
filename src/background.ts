@@ -1,34 +1,41 @@
+import 'core-js/stable';
+import 'regenerator-runtime/runtime';
 import io from 'socket.io-client';
 import getSupportedFormats from './util/getSupportedFormats';
+import { browser, Downloads, Notifications } from 'webextension-polyfill-ts';
 
 const MAIN_ICON = './icons/icon-512x512.a56b07dc.png';
 const API_BASE = 'https://api.cloudconvert.com/v2';
 const WEBSOCKET_BASE = 'https://socketio.cloudconvert.com';
-const waitUntilFinished = (
+const waitUntilFinished = async (
   id: number
-): Promise<chrome.downloads.DownloadItem> =>
-  new Promise<chrome.downloads.DownloadItem>(resolve =>
-    chrome.downloads.search({ id }, results => resolve(results[0]))
-  ).then(item => {
-    if (item.state === 'complete') return item;
-    else
-      return new Promise<chrome.downloads.DownloadItem>(resolve =>
-        setTimeout(() => resolve(waitUntilFinished(id)), 100)
-      );
-  });
-chrome.browserAction.setBadgeBackgroundColor({
+): Promise<Downloads.DownloadItem> => {
+  const [item] = await browser.downloads.search({ id });
+  if (item.state === 'complete') return item;
+  else
+    return new Promise<Downloads.DownloadItem>(resolve =>
+      setTimeout(() => resolve(waitUntilFinished(id)), 100)
+    );
+};
+browser.browserAction.setBadgeBackgroundColor({
   color: 'gray'
 });
-chrome.downloads.onDeterminingFilename.addListener(item => {
-  if (item.byExtensionId === chrome.runtime.id) return;
-  const filename = item.filename;
+
+type PossiblyChromeDownloadItem = Downloads.DownloadItem & {
+  finalUrl?: string;
+};
+interface PossiblyChromeCreateNotificationOptions extends Notifications.CreateNotificationOptions {
+  buttons: Notifications.CreateNotificationOptionsButtonsItemType[]
+}
+
+const downloadHandler = (item: PossiblyChromeDownloadItem, filename: string): void => {
   const ext = filename.slice(filename.lastIndexOf('.') + 1).toLocaleLowerCase();
-  chrome.storage.local.get([ext], ({ [ext]: content }) => {
-    if (chrome.runtime.lastError || typeof content === 'undefined') {
+  browser.storage.local.get([ext]).then(({ [ext]: content }) => {
+    if (typeof content === 'undefined') {
       getSupportedFormats(ext).then(vals => {
         if (vals.length === 0) return;
         const notifId = item.id.toString(36);
-        chrome.notifications.create(notifId, {
+        browser.notifications.create(notifId, {
           title: `${ext.toLocaleUpperCase()} file conversion`,
           type: 'basic',
           message: `Should files with the .${ext} extension be automatically converted?`,
@@ -42,21 +49,20 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
               title: 'No'
             }
           ]
-        });
+        } as PossiblyChromeCreateNotificationOptions);
         const noAction = (): void => {
-          chrome.storage.local.set({
+          browser.storage.local.set({
             [ext]: {
               disabled: true
             }
           });
         };
         const configure = (): void => {
-          chrome.storage.local.set(
-            {
+          browser.storage.local
+            .set({
               recommendedOption: ext
-            },
-            () => chrome.runtime.openOptionsPage()
-          );
+            })
+            .then(() => browser.runtime.openOptionsPage());
         };
         const onButtonClicked = (id: string, ind: number): void => {
           if (id === notifId) {
@@ -64,21 +70,28 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
             else noAction();
           }
         };
-        chrome.notifications.onClosed.addListener(id => onButtonClicked(id, 1));
-        chrome.notifications.onButtonClicked.addListener(onButtonClicked);
-        chrome.notifications.onClicked.addListener(id =>
+        browser.notifications.onClosed.addListener(id =>
+          onButtonClicked(id, 1)
+        );
+        browser.notifications.onButtonClicked.addListener(onButtonClicked);
+        browser.notifications.onClicked.addListener(id =>
           onButtonClicked(id, 0)
         );
       });
     } else {
       if (content.disabled) return;
-      chrome.storage.sync.get(['apiKey'], ({ apiKey }) => {
-        if (apiKey && !chrome.runtime.lastError) {
+      browser.storage.sync.get(['apiKey']).then(({ apiKey }) => {
+        if (apiKey) {
           const token = apiKey.accessToken;
-          chrome.browserAction.setBadgeText({
+          browser.browserAction.setBadgeText({
             text: '...'
           });
-          if (content.removeOrig) chrome.downloads.cancel(item.id);
+          if (content.removeOrig) {
+            browser.downloads.cancel(item.id);
+            browser.downloads.erase({
+              id: item.id
+            });
+          }
           fetch(`${API_BASE}/jobs`, {
             method: 'POST',
             headers: {
@@ -91,8 +104,8 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
               tasks: {
                 importFile: {
                   operation: 'import/url',
-                  url: item.finalUrl,
-                  filename: item.filename
+                  url: item.finalUrl || item.url,
+                  filename
                 },
                 convert: {
                   operation: 'convert',
@@ -131,29 +144,32 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
                     };
                   }
                 ) => {
-                  chrome.downloads.download(
-                    {
+                  browser.downloads
+                    .download({
                       url: data.job.tasks.find(
                         (el: { operation: string }) =>
                           el.operation === 'export/url'
                       ).result.files[0].url
-                    },
-                    () => {
-                      chrome.browserAction.setBadgeText({
-                        text: chrome.runtime.lastError ? '❌' : '✔️'
+                    })
+                    .then(
+                      () => '✔️',
+                      () => '❌'
+                    )
+                    .then(text => {
+                      browser.browserAction.setBadgeText({
+                        text
                       });
                       setTimeout(
                         () =>
-                          chrome.browserAction.setBadgeText({
+                          browser.browserAction.setBadgeText({
                             text: ''
                           }),
                         5000
                       );
-                    }
-                  );
+                    });
                 }
               );
-              const fallbackDownload = (downloadId: number) =>
+              const fallbackDownload = (downloadId: number): Promise<void> =>
                 waitUntilFinished(downloadId).then(item => {
                   const xhr = new XMLHttpRequest();
                   xhr.open('GET', `file://${item.filename}`, true);
@@ -219,40 +235,46 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
                               };
                             }
                           ) => {
-                            chrome.downloads.download(
-                              {
+                            browser.downloads
+                              .download({
                                 url: data.job.tasks.find(
                                   (el: { operation: string }) =>
                                     el.operation === 'export/url'
                                 ).result.files[0].url
-                              },
-                              () => {
-                                chrome.browserAction.setBadgeText({
-                                  text: chrome.runtime.lastError ? '❌' : '✔️'
+                              })
+                              .then(
+                                () => '✔️',
+                                () => '❌'
+                              )
+                              .then(text => {
+                                browser.browserAction.setBadgeText({
+                                  text
                                 });
                                 setTimeout(
                                   () =>
-                                    chrome.browserAction.setBadgeText({
+                                    browser.browserAction.setBadgeText({
                                       text: ''
                                     }),
                                   5000
                                 );
-                              }
-                            );
+                              });
                             if (content.removeOrig)
-                              chrome.downloads.removeFile(item.id);
+                              browser.downloads.removeFile(item.id);
+                              browser.downloads.erase({
+                                id: item.id
+                              });
                           }
                         );
                         socket.on(
                           'job.failed',
                           (channel: string, data: unknown) => {
                             console.log(data);
-                            chrome.browserAction.setBadgeText({
+                            browser.browserAction.setBadgeText({
                               text: '❌'
                             });
                             setTimeout(
                               () =>
-                                chrome.browserAction.setBadgeText({
+                                browser.browserAction.setBadgeText({
                                   text: ''
                                 }),
                               5000
@@ -265,41 +287,59 @@ chrome.downloads.onDeterminingFilename.addListener(item => {
                   xhr.responseType = 'blob';
                   xhr.send();
                 });
-              socket.on('job.failed', (channel: string, data: unknown) => {
-                chrome.permissions.request(
-                  {
+              socket.on('job.failed', () => {
+                browser.permissions
+                  .request({
                     origins: ['file://*']
-                  },
-                  granted => {
+                  })
+                  .then(granted => {
                     if (granted) {
                       if (content.removeOrig)
-                        chrome.downloads.download(
-                          {
+                        browser.downloads
+                          .download({
                             url: item.url
-                          },
-                          downloadId => {
+                          })
+                          .then(downloadId => {
                             fallbackDownload(downloadId);
-                          }
-                        );
+                          });
                       else fallbackDownload(item.id);
                     } else {
-                      chrome.browserAction.setBadgeText({
-                        text: 'FAIL'
+                      browser.browserAction.setBadgeText({
+                        text: '❌'
                       });
                       setTimeout(
                         () =>
-                          chrome.browserAction.setBadgeText({
+                          browser.browserAction.setBadgeText({
                             text: ''
                           }),
                         5000
                       );
                     }
-                  }
-                );
+                  });
               });
             });
         }
       });
     }
   });
+}
+
+const parseFilename = (fn: string): string => fn.split('\\').pop().split('/').pop();
+declare const chrome: {
+  downloads: {
+    onDeterminingFilename: typeof browser.downloads.onCreated
+  }
+} | undefined;
+let evt = browser.downloads.onCreated;
+if (typeof chrome !== 'undefined') evt = chrome.downloads.onDeterminingFilename;
+evt.addListener((item: PossiblyChromeDownloadItem) => {
+  if (item.byExtensionId === browser.runtime.id) return;
+  let filename = item.filename;
+  if (!filename)
+    browser.downloads.onChanged.addListener(({ id, filename: fn }) => {
+      if (id === item.id && fn && fn.previous !== fn.current) {
+        downloadHandler(item, parseFilename(fn.current));
+      }
+    });
+  else downloadHandler(item, parseFilename(filename));
 });

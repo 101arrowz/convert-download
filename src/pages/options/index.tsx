@@ -1,6 +1,8 @@
-import React, { useState, Suspense, lazy } from "react";
+import React, { useState, Suspense, lazy, useEffect, useRef } from "react";
+import { browser } from 'webextension-polyfill-ts';
 
-const InputOutputFormats = lazy<React.FC<{}>>(() => fetch('https://api.cloudconvert.com/v2/convert/formats').then(res => res.json()).then(data => {
+const InputOutputFormats = lazy<React.FC<{}>>(async () => {
+  const data = await (await fetch('https://api.cloudconvert.com/v2/convert/formats')).json();
   const formats = data.data;
   const inputFormatsSet: Set<string> = new Set();
   const outputMapper: { [k: string]: string[] } = {};
@@ -11,51 +13,46 @@ const InputOutputFormats = lazy<React.FC<{}>>(() => fetch('https://api.cloudconv
       outputMapper[format.input_format] = [format.output_format];
     else outs.push(format.output_format);
   }
+  let { recommendedOption: defaultExt } = await browser.storage.local.get(['recommendedOption']) as { recommendedOption: string };
+  if (defaultExt) browser.storage.local.remove(['recommendedOption']);
+  if (!inputFormatsSet.has(defaultExt)) defaultExt = '';
   const inputFormats = [...inputFormatsSet];
-  return new Promise(resolve => chrome.storage.local.get(['recommendedOption'], ({ recommendedOption: defaultExt }: { recommendedOption: string }) => {
-    if (!chrome.runtime.lastError && defaultExt) chrome.storage.local.remove(['recommendedOption']);
-    console.log(defaultExt);
-    if (!inputFormats.includes(defaultExt)) defaultExt = '';
-    resolve({
-      default: () => {
-        const [ext, setExt] = useState('');
-        const [convertTo, setConvertTo] = useState('');
-        const [disabled, setDisabled] = useState(false);
-        const [removeOrig, setRemoveOrig] = useState(false);
-        const outputFormats = outputMapper[ext];
-        return (
-          <>
-            <span>Input Format</span><select onChange={newVal => {
-              setExt(newVal.target.value);
-            }} value={ext}>
-              {inputFormats.map(el => <option key={el} value={el}>{el}</option>)}
-            </select>
-            {outputFormats ? <><span>Output Format</span><select onChange={newVal => {
-              setConvertTo(newVal.target.value);
-            }}>
-              {outputFormats.map(el => <option key={el} value={el}>{el}</option>)}
-            </select>
-            <span>Remove Original</span><input type="checkbox" checked={removeOrig} onClick={() => setRemoveOrig(!removeOrig)}></input>
-            <span>Disabled</span><input  type="checkbox" checked={disabled} onClick={() => setDisabled(!disabled)}></input>
-            <button onClick={() => {
-              chrome.storage.local.set({
-                [ext]: {
-                  disabled,
-                  convertTo,
-                  removeOrig
-                }
-              });
-              setExt('');
-              setConvertTo('');
-              setDisabled(false);
-              setRemoveOrig(false);
-            }}>Make change</button></> : <span>Please select a valid extension.</span>}
-          </>
-        );
-      }
-    });
-  }));
-}));
+  return {
+    default: () => {
+      const [ext, setExt] = useState(defaultExt);
+      const outputFormats = outputMapper[ext];
+      const [disabled, setDisabled] = useState(false);
+      const [removeOrig, setRemoveOrig] = useState(false);
+      const outputFormatRef = useRef();
+      return (
+        <>
+          <span>Input Format</span><select onChange={newVal => {
+            setExt(newVal.target.value);
+          }} value={ext}>
+            {inputFormats.map(el => <option key={el} value={el}>{el}</option>)}
+          </select>
+          {outputFormats ? <><span>Output Format</span><select ref={outputFormatRef}>
+            {outputFormats.map(el => <option key={el} value={el}>{el}</option>)}
+          </select>
+          <span>Remove Original</span><input type="checkbox" checked={removeOrig} onClick={() => setRemoveOrig(!removeOrig)}></input>
+          <span>Disabled</span><input type="checkbox" checked={disabled} onClick={() => setDisabled(!disabled)}></input>
+          <button onClick={() => {
+            browser.storage.local.set({
+              [ext]: {
+                disabled,
+                convertTo: (outputFormatRef.current as HTMLInputElement).value,
+                removeOrig
+              }
+            });
+            setExt('');
+            setDisabled(false);
+            setRemoveOrig(false);
+          }}>Make change</button></> : <span>Please select a valid extension.</span>}
+        </>
+      );
+    }
+  };
+});
 
 const Options: React.FC = () => {
   return (

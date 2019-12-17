@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "cookie": "^0.4.0",
+    "core-js": "3",
     "preact": "^10.1.0",
     "socket.io-client": "^2.3.0"
   },
@@ -20,7 +21,6 @@
     "@babel/core": "^7.7.5",
     "@babel/plugin-transform-react-jsx": "^7.7.4",
     "@babel/preset-env": "^7.7.6",
-    "@types/chrome": "^0.0.91",
     "@types/cookie": "^0.3.3",
     "@types/react": "^16.9.16",
     "@types/react-dom": "^16.9.4",
@@ -37,7 +37,8 @@
     "prettier": "^1.19.1",
     "react": "^16.12.0",
     "react-dom": "^16.12.0",
-    "typescript": "^3.7.3"
+    "typescript": "^3.7.3",
+    "webextension-polyfill-ts": "^0.11.0"
   },
   "pwaManifest": {
     "icongeneration": {
